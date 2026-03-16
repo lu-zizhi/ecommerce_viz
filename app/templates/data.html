@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<h2>数据管理</h2>
+
+<!-- 数据量统计 -->
+<div id="stats" style="margin-bottom:20px;">
+    <span>商品数：<b id="product-count">-</b></span> &nbsp;|&nbsp;
+    <span>订单数：<b id="order-count">-</b></span> &nbsp;|&nbsp;
+    <span>每日指标：<b id="metrics-count">-</b></span>
+    <button onclick="loadStats()" style="margin-left:10px;">刷新</button>
+</div>
+
+<hr>
+
+<!-- 一键导入本地文件 -->
+<h3>一键导入本地数据</h3>
+<p style="color:gray;">直接导入 data/ 目录下的文件，无需上传</p>
+
+<button onclick="importLocal('products', 'Sale Report.csv')">
+    导入商品数据（Sale Report.csv）
+</button>
+&nbsp;
+<button onclick="importLocal('orders', 'Amazon Sale Report.csv')">
+    导入订单数据（Amazon Sale Report.csv）
+</button>
+&nbsp;
+<button onclick="importLocal('metrics', '')">
+    汇总每日指标
+</button>
+
+<div id="import-result" style="margin-top:15px; color:green;"></div>
+
+<hr>
+
+<!-- 上传新文件 -->
+<h3>上传新 CSV 文件</h3>
+<select id="upload-type">
+    <option value="orders">订单数据</option>
+    <option value="products">商品数据</option>
+</select>
+<input type="file" id="upload-file" accept=".csv">
+<button onclick="uploadFile()">上传并导入</button>
+<div id="upload-result" style="margin-top:15px; color:green;"></div>
+
+<script>
+// 页面加载时自动获取数据量
+window.onload = loadStats;
+
+function loadStats() {
+    fetch('/data/stats')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('product-count').textContent = data.products;
+            document.getElementById('order-count').textContent = data.orders;
+            document.getElementById('metrics-count').textContent = data.daily_metrics;
+        });
+}
+
+function importLocal(type, filename) {
+    document.getElementById('import-result').textContent = '导入中，请稍候...';
+    fetch('/data/import-local', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({type: type, filename: filename})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('import-result').textContent =
+                `✅ 导入成功！导入 ${data.imported || data.days} 条，跳过 ${data.skipped || 0} 条`;
+        } else {
+            document.getElementById('import-result').style.color = 'red';
+            document.getElementById('import-result').textContent = `❌ 导入失败：${data.error}`;
+        }
+        loadStats();
+    });
+}
+
+function uploadFile() {
+    const file = document.getElementById('upload-file').files[0];
+    const type = document.getElementById('upload-type').value;
+    if (!file) { alert('请先选择文件'); return; }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('type', type);
+
+    document.getElementById('upload-result').textContent = '上传中...';
+    fetch('/data/upload', {method: 'POST', body: formData})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('upload-result').textContent =
+                    `✅ 上传成功！导入 ${data.imported} 条，跳过 ${data.skipped} 条`;
+            } else {
+                document.getElementById('upload-result').style.color = 'red';
+                document.getElementById('upload-result').textContent = `❌ 失败：${data.error}`;
+            }
+            loadStats();
+        });
+}
+</script>
+
+{% endblock %}

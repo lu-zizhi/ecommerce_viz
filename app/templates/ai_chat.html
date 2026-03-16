@@ -1,0 +1,251 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<!-- 页面标题 -->
+<div class="page-header">
+    <h4><i class="bi bi-robot text-primary me-2"></i>智能分析</h4>
+    <p>用自然语言提问，AI 自动生成图表与业务洞察</p>
+</div>
+
+<div class="row g-3" style="height:calc(100vh - 180px);">
+
+    <!-- 左侧对话区 -->
+    <div class="col-md-4 d-flex flex-column" style="height:100%;">
+
+        <!-- 预设问题 -->
+        <div class="chart-card mb-3" style="flex-shrink:0;">
+            <div class="chart-title" style="margin-bottom:10px;">
+                <i class="bi bi-lightbulb"></i>推荐问题
+            </div>
+            <div>
+                <button class="suggest-btn" onclick="ask('每个品类的销售额是多少？用饼图展示')">
+                    <i class="bi bi-pie-chart-fill me-1"></i>各品类销售额占比
+                </button>
+                <button class="suggest-btn" onclick="ask('每天的订单数量趋势是怎样的？')">
+                    <i class="bi bi-graph-up me-1"></i>每日订单趋势
+                </button>
+                <button class="suggest-btn" onclick="ask('销售额最高的10个省份是哪些？')">
+                    <i class="bi bi-geo-alt-fill me-1"></i>Top10省份销售额
+                </button>
+                <button class="suggest-btn" onclick="ask('各尺码的销售数量分布如何？')">
+                    <i class="bi bi-bar-chart-fill me-1"></i>各尺码销售分布
+                </button>
+                <button class="suggest-btn" onclick="ask('B2B和B2C订单数量对比')">
+                    <i class="bi bi-people-fill me-1"></i>B2B vs B2C对比
+                </button>
+                <button class="suggest-btn" onclick="ask('每月的平均客单价变化趋势')">
+                    <i class="bi bi-calendar3 me-1"></i>月均客单价趋势
+                </button>
+            </div>
+        </div>
+
+        <!-- 对话历史 -->
+        <div class="chart-card d-flex flex-column" style="flex:1; overflow:hidden; padding:16px;">
+            <div class="chart-title" style="margin-bottom:10px; flex-shrink:0;">
+                <i class="bi bi-chat-dots"></i>对话记录
+            </div>
+            <div id="chat-history"
+                style="flex:1; overflow-y:auto; padding-right:4px;">
+                <div style="color:#bfbfbf; font-size:13px; text-align:center; padding:30px 0;">
+                    <i class="bi bi-chat-square-dots" style="font-size:28px; display:block; margin-bottom:8px;"></i>
+                    点击推荐问题或输入问题开始分析
+                </div>
+            </div>
+
+            <!-- 输入框 -->
+            <div class="d-flex gap-2 mt-2" style="flex-shrink:0;">
+                <input type="text" id="query-input"
+                    placeholder="输入问题，按 Enter 发送..."
+                    class="form-control form-control-sm"
+                    style="font-size:13px;"
+                    onkeydown="if(event.key==='Enter') sendQuery()">
+                <button onclick="sendQuery()" id="send-btn"
+                    class="btn btn-primary btn-sm"
+                    style="white-space:nowrap; padding:0 16px;">
+                    <i class="bi bi-send-fill"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧图表区 -->
+    <div class="col-md-8 d-flex flex-column" style="height:100%; overflow-y:auto;">
+
+        <!-- 空状态 -->
+        <div id="empty-state" class="chart-card d-flex align-items-center
+             justify-content-center" style="flex:1; min-height:400px;">
+            <div style="text-align:center; color:#bfbfbf;">
+                <i class="bi bi-bar-chart-line"
+                   style="font-size:52px; display:block; margin-bottom:16px; color:#d9d9d9;"></i>
+                <div style="font-size:15px; margin-bottom:6px; color:#8c8c8c;">等待分析</div>
+                <div style="font-size:13px;">输入自然语言问题，AI 自动生成图表</div>
+            </div>
+        </div>
+
+        <!-- 结果区（初始隐藏） -->
+        <div id="result-area" style="display:none;">
+
+            <!-- AI 洞察 -->
+            <div class="chart-card mb-3"
+                style="background:linear-gradient(135deg,#fffbe6,#fff8dc);
+                       border:1px solid #ffe58f;">
+                <div class="chart-title" style="border-bottom:1px solid #ffe58f; color:#874d00;">
+                    <i class="bi bi-stars" style="color:#faad14;"></i>AI 洞察
+                </div>
+                <div id="insight-text"
+                    style="font-size:14px; color:#614700; line-height:1.8;"></div>
+            </div>
+
+            <!-- 图表卡片 -->
+            <div class="chart-card mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-3"
+                    style="padding-bottom:12px; border-bottom:1px solid #f5f5f5;">
+                    <div class="chart-title" style="margin:0; border:none; padding:0;">
+                        <i class="bi bi-bar-chart"></i>
+                        <span id="chart-title">分析结果</span>
+                    </div>
+                    <!-- SQL 折叠按钮 -->
+                    <button class="btn btn-outline-secondary btn-sm"
+                        onclick="toggleSQL()" style="font-size:12px;">
+                        <i class="bi bi-code-slash me-1"></i>查看 SQL
+                    </button>
+                </div>
+                <!-- SQL 展示 -->
+                <div id="sql-box" style="display:none; margin-bottom:12px;">
+                    <pre id="sql-text"
+                        style="background:#1e1e2e; color:#cdd6f4; border-radius:8px;
+                               padding:14px; font-size:12px; overflow-x:auto; margin:0;
+                               line-height:1.6;"></pre>
+                </div>
+                <!-- 图表 -->
+                <div id="main-chart" style="height:420px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+let chart = null;
+
+function ask(question) {
+    document.getElementById('query-input').value = question;
+    sendQuery();
+}
+
+function sendQuery() {
+    const input = document.getElementById('query-input');
+    const query = input.value.trim();
+    if (!query) return;
+
+    addMessage('user', query);
+    input.value = '';
+
+    const btn = document.getElementById('send-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    document.getElementById('empty-state').style.display = 'none';
+
+    const thinkingId = addMessage('ai', '🤔 正在分析，请稍候...');
+
+    fetch('/ai/query', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({query: query})
+    })
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById(thinkingId).remove();
+
+        if (data.success) {
+            addMessage('ai', `✅ 已生成「${data.title}」`);
+
+            // 显示结果区
+            document.getElementById('result-area').style.display = 'block';
+
+            // 洞察
+            document.getElementById('insight-text').textContent = data.insight;
+
+            // SQL
+            document.getElementById('sql-text').textContent = data.sql;
+            document.getElementById('sql-box').style.display = 'none';
+
+            // 图表标题
+            document.getElementById('chart-title').textContent = data.title;
+
+            // 渲染图表
+            if (!chart) {
+                chart = echarts.init(document.getElementById('main-chart'));
+            }
+            chart.setOption(data.echarts_option, true);
+            setTimeout(() => chart.resize(), 100);
+
+        } else {
+            addMessage('ai', `❌ ${data.error}`);
+        }
+    })
+    .catch(err => {
+        document.getElementById(thinkingId).remove();
+        addMessage('ai', `❌ 请求失败：${err.message}`);
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-send-fill"></i>';
+    });
+}
+
+function addMessage(role, text) {
+    const history = document.getElementById('chat-history');
+    const id = 'msg-' + Date.now();
+    const isUser = role === 'user';
+    const div = document.createElement('div');
+    div.id = id;
+    div.style.cssText = `margin-bottom:10px; display:flex;
+        justify-content:${isUser ? 'flex-end' : 'flex-start'};`;
+    div.innerHTML = `
+        <div style="max-width:88%; padding:8px 12px; border-radius:10px;
+            font-size:13px; line-height:1.5;
+            background:${isUser ? '#5470c6' : '#f5f5f5'};
+            color:${isUser ? '#fff' : '#434343'};
+            border:${isUser ? 'none' : '1px solid #ebebeb'};">
+            ${text}
+        </div>`;
+    history.appendChild(div);
+    history.scrollTop = history.scrollHeight;
+    return id;
+}
+
+function toggleSQL() {
+    const box = document.getElementById('sql-box');
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+}
+
+window.addEventListener('resize', () => { if (chart) chart.resize(); });
+</script>
+
+<style>
+.suggest-btn {
+    display: inline-flex;
+    align-items: center;
+    margin: 3px;
+    padding: 5px 11px;
+    background: #f5f8ff;
+    border: 1px solid #d6e4ff;
+    border-radius: 16px;
+    font-size: 12px;
+    color: #5470c6;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+.suggest-btn:hover {
+    background: #d6e4ff;
+    border-color: #adc6ff;
+}
+#chat-history::-webkit-scrollbar { width: 4px; }
+#chat-history::-webkit-scrollbar-track { background: transparent; }
+#chat-history::-webkit-scrollbar-thumb { background: #e0e0e0; border-radius: 2px; }
+</style>
+
+{% endblock %}
