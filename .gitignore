@@ -1,7 +1,24 @@
+# 忽略 Python 虚拟环境
 venv/
-.env
-__pycache__/
+.venv/
+env/
+
+# 忽略 Python 编译缓存
+**/__pycache__/
 *.pyc
 *.pyo
-instance/
+*.pyd
+
+# 忽略本地配置文件和敏感信息
+.env
+.idea/
+.vscode/
+
+# 忽略本地大文件数据与输出产物（可选，建议只在本地保留）
+data/
+outputs/
+*.whl
+
+# 忽略操作系统临时文件
 .DS_Store
+Thumbs.db

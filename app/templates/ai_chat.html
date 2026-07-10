@@ -163,9 +163,36 @@ function sendQuery() {
 
             // 显示结果区
             document.getElementById('result-area').style.display = 'block';
+            //AI洞察
+           let insightHtml = '';
+            // 1. 判断后端传来的是不是我们结构化好的对象
+            if (typeof data.insight === 'object' && data.insight !== null) {
+                insightHtml = `
+        <div style="margin-bottom: 8px;">
+            <span style="font-weight:600; color:#874d00;"><i class="bi bi-clipboard-data"></i> 数据表现：</span>
+            <span style="color:#614700;">${data.insight.what || '暂无数据'}</span>
+        </div>
+        <div style="margin-bottom: 8px;">
+            <span style="font-weight:600; color:#d46b08;"><i class="bi bi-search"></i> 归因分析：</span>
+            <span style="color:#614700;">${data.insight.why || '暂无分析'}</span>
+        </div>
+        <div>
+            <span style="font-weight:600; color:#389e0d;"><i class="bi bi-rocket-takeoff"></i> 落地建议：</span>
+            <span style="color:#614700;">${data.insight.how || '暂无建议'}</span>
+        </div>
+    `;
+}        else {
+    // 兜底：如果由于某种原因大模型还是只返回了普通字符串，就直接显示
+    insightHtml = `<div style="color:#614700;">${data.insight}</div>`;
+}
 
-            // 洞察
-            document.getElementById('insight-text').textContent = data.insight;
+// 2. 将解析好的三段式业务洞察，和底部的性能监控小尾巴拼装在一起，插入 HTML
+document.getElementById('insight-text').innerHTML = insightHtml +
+    `<div style="margin-top:12px; padding-top:8px; border-top:1px dashed #ffe58f; font-size:12px; color:#b58200; display:flex; gap:15px;">
+        <span><i class="bi bi-stopwatch"></i> 链路耗时: <b>${data.latency}s</b></span>
+        <span><i class="bi bi-cpu"></i> 消耗 Token: <b>${data.total_tokens}</b></span>
+        <span><i class="bi bi-shield-check"></i> Agent 纠错已就绪</span>
+    </div>`;
 
             // SQL
             document.getElementById('sql-text').textContent = data.sql;
@@ -197,7 +224,7 @@ function sendQuery() {
 
 function addMessage(role, text) {
     const history = document.getElementById('chat-history');
-    const id = 'msg-' + Date.now();
+    const id = 'msg-' + Date.now(); //设定唯一时间戳
     const isUser = role === 'user';
     const div = document.createElement('div');
     div.id = id;
@@ -212,7 +239,7 @@ function addMessage(role, text) {
             ${text}
         </div>`;
     history.appendChild(div);
-    history.scrollTop = history.scrollHeight;
+    history.scrollTop = history.scrollHeight; // 每当有新消息，强制滚动条跳到最底部。
     return id;
 }
 

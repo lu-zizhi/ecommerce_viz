@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, jsonify
 from app.services.nl2vis import nl2vis
 
+# 定义蓝图
 ai_bp = Blueprint('ai', __name__)
 
 
