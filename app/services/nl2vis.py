@@ -1,5 +1,6 @@
 from app.services.deepseek import chat
 from app import db
+from app.models import ChatMessage  # 新增导入
 import json
 import re
 import time
@@ -37,7 +38,6 @@ SCHEMA_METRICS = """3. daily_metrics（每日指标表，共91天）
    - avg_order_value: 当日平均客单价
    - cancelled_orders: 当日取消订单数"""
 
-# 还原你原本的 CHART_TYPES
 CHART_TYPES = """可用的图表类型：
 - line: 折线图，适合展示趋势变化（时间序列）
 - bar: 柱状图，适合对比不同类别的数量或金额
@@ -55,19 +55,24 @@ def get_dynamic_schema(user_query):
     return "\n".join(schemas)
 
 
-def nl2vis(user_query):
-    start_time = time.time()  # 新增：记录开始时间
-    total_tokens = 0  # 新增：初始化Token统计
+def nl2vis(user_query, user_id):
+    """🌟 升级版：支持多轮会话记忆的 NL2VIS 核心 Agent"""
+    start_time = time.time()
+    total_tokens = 0
 
     db_schema = get_dynamic_schema(user_query)
 
-    # 还原你原本的 step1 提示词细节
+    # 1. 🌟 从数据库读取该用户最近 6 条（3轮）历史对话作为上下文记忆
+    history_messages = ChatMessage.query.filter_by(user_id=user_id)\
+        .order_by(ChatMessage.created_at.desc()).limit(6).all()
+    history_messages.reverse()  # 恢复正向时间轴顺序
+
+    # 2. 构造 Step 1 专家 System Prompt
     step1_messages = [
         {
             'role': 'system',
-            'content': f"""你是一个跨境电商数据分析专家。用户会用自然语言描述他想看的数据，你需要：
-1. 生成对应的SQL查询语句
-2. 推荐最合适的图表类型
+            'content': f"""你是一个跨境电商数据分析专家。用户会用自然语言描述他想看的数据，你需要生成对应的SQL并推荐图表。
+【重要】用户可能正在与你进行多轮连续追问。请结合上下文历史对话理解用户的真实意图。如果用户提出修改上一步图表的要求（例如“把刚才的图表换成折线图”或“只要看其中B2B的部分”），请基于历史中已生成的SQL和图表配置进行微调升级。
 
 数据库包含以下表：
 {db_schema}
@@ -83,19 +88,30 @@ def nl2vis(user_query):
     "title": "图表标题"
 }}
 注意：
-- SQL只能是SELECT语句，不能有UPDATE/DELETE/DROP等
-- 结果行数限制在50行以内，使用LIMIT
-- 日期字段使用DATE_FORMAT格式化
-- 金额保留2位小数用ROUND函数"""
-        },
-        {
-            'role': 'user',
-            'content': user_query
+- SQL只能是SELECT语句，结果行数限制在50行以内。
+- 日期字段使用DATE_FORMAT格式化，金额保留2位小数。"""
         }
     ]
 
+    # 3. 🌟 把历史记忆无缝注入给大模型
+    for msg in history_messages:
+        # 如果是 assistant 角色，为了防止大模型复读之前的完整图表配置，我们只把关键的 SQL 规划喂回去
+        if msg.role == 'assistant' and msg.content.startswith('{'):
+            try:
+                vis_json = json.loads(msg.content)
+                clean_content = f"我已经为您生成了图表。执行的SQL是: {vis_json.get('sql')}，推荐图表类型是: {vis_json.get('chart_type')}。"
+                step1_messages.append({'role': 'assistant', 'content': clean_content})
+            except:
+                step1_messages.append({'role': msg.role, 'content': msg.content})
+        else:
+            step1_messages.append({'role': msg.role, 'content': msg.content})
+
+    # 4. 放入本次用户的新问题
+    step1_messages.append({'role': 'user', 'content': user_query})
+
+    # 调用大模型生成 SQL 规划
     step1_result = chat(step1_messages, temperature=0.1)
-    total_tokens += step1_result.get('tokens', 0)  # 累加 Token
+    total_tokens += step1_result.get('tokens', 0)
 
     if not step1_result['success']:
         return {'success': False, 'error': step1_result['error']}
@@ -112,37 +128,21 @@ def nl2vis(user_query):
     if not sql.strip().upper().startswith('SELECT'):
         return {'success': False, 'error': '只允许SELECT查询'}
 
-    # 还原错误捕获，在内部无损插入纠错逻辑
+    # 执行数据库查询（包含 Self-Correction 自愈代码）
     try:
         result = db.session.execute(db.text(sql))
         rows = result.fetchall()
         columns = list(result.keys())
         data = [dict(zip(columns, row)) for row in rows]
     except Exception as e:
-        error_traceback = traceback.format_exc()
         error_msg = str(e)
-        print(f"[Self-Correction Triggered] 原始SQL报错: {error_msg}")
-
-        # 专门为论文截图定制的终端打印格式
-        print("\n" + "=" * 20 + " [Agent 触发反思与自愈机制] " + "=" * 20)
-        print("❌ 数据库执行抛出异常，捕获到以下 Traceback 堆栈：")
-        print(error_traceback)  # 这里会打印出长长的一大串红色报错
-        print("正在挂起主线程，拦截异常传播...")
-        print("正在将报错日志(Emsg)注入 Reflection Prompt，驱动大模型重写SQL...")
-        print("=" * 68 + "\n")
-
+        print(f"[Agent 自愈触发] 原始SQL报错: {error_msg}")
         retry_messages = [
-            {
-                'role': 'system',
-                'content': f"你是一个高级数据库诊断专家。之前的SQL执行失败了，请仔细阅读错误信息，修复SQL语句。\n数据库结构如下：\n{db_schema}\n请严格输出和之前一样的JSON格式，包含修改后的sql等字段。"
-            },
-            {
-                'role': 'user',
-                'content': f"用户的原始问题是：{user_query}\n你刚才生成的SQL是：{sql}\n在MySQL中执行时遇到了以下报错：\n{error_msg}\n\n请分析报错原因，修复SQL，并仅返回完整的JSON结果。"
-            }
+            {'role': 'system', 'content': f"你是一个高级数据库诊断专家。之前的SQL执行失败了，请仔细阅读错误信息，修复SQL语句。\n{db_schema}\n请严格输出和之前一样的JSON格式。"},
+            {'role': 'user', 'content': f"用户的原始问题是：{user_query}\n你生成的错SQL是：{sql}\n报错信息：{error_msg}\n请分析原因并修复，仅返回完整的JSON结果。"}
         ]
         retry_result = chat(retry_messages, temperature=0.1)
-        total_tokens += retry_result.get('tokens', 0)  # 累加纠错 Token
+        total_tokens += retry_result.get('tokens', 0)
 
         if retry_result['success']:
             try:
@@ -156,7 +156,6 @@ def nl2vis(user_query):
                 rows = result.fetchall()
                 columns = list(result.keys())
                 data = [dict(zip(columns, row)) for row in rows]
-                print(f"[Self-Correction Success] SQL已成功修复并执行！")
             except Exception as retry_e:
                 return {'success': False, 'error': f"SQL执行错误：{str(retry_e)}", 'sql': sql}
         else:
@@ -165,7 +164,7 @@ def nl2vis(user_query):
     if not data:
         return {'success': False, 'error': '查询结果为空，请换个问题试试', 'sql': sql}
 
-    # 还原你最原始的 step3 提示词！绝对不乱改 ECharts 规则
+    # Step 3: 生成 ECharts 配置与深度业务洞察
     step3_messages = [
         {
             'role': 'system',
@@ -175,27 +174,20 @@ def nl2vis(user_query):
                 "echarts_option": { ECharts的option配置对象 },
                 "insight": {
                     "what": "数据表现：用1句话概括数据反映的核心客观事实（列出关键指标数字）。",
-                    "why": "归因推测：结合跨境电商业务逻辑（如选品、测款、季节性、供应链、尺码匹配等），深度推测产生该现象的1-2个深层原因。",
-                    "how": "落地建议：给出具有极强可执行性的运营、营销或库存优化策略。"
+                    "why": "归因推测": "结合跨境电商业务逻辑，深度推测产生该现象的1-2个深层原因。",
+                    "how": "落地建议": "给出具有极强可执行性的运营、营销或库存优化策略。"
                 }
             }
-ECharts配置要求：
-- 必须包含 tooltip、legend（如果有多系列）、xAxis、yAxis、series
-- 饼图不需要xAxis和yAxis
-- 颜色使用ECharts默认配色即可
-- title不需要设置（页面上已有标题）
-- 严禁在JSON中使用任何JavaScript函数，formatter只能用字符串模板如"{b}: {c}"
-- axisLabel中不能有function，只能用简单字符串
-- 所有值必须是JSON合法类型：字符串、数字、布尔、数组、对象"""
+ECharts配置要求：必须包含 tooltip、legend、xAxis、yAxis、series，饼图不需要双轴，严禁使用任何JS匿名函数。"""
         },
         {
             'role': 'user',
-            'content': f"用户问题：{user_query}\n图表类型：{plan.get('chart_type')}\n图表标题：{plan.get('title')}\n查询数据（前20条）：{json.dumps(data[:20], ensure_ascii=False, default=str)}\n字段说明：x轴={plan.get('x_field')}，y轴={plan.get('y_field')}"
+            'content': f"用户问题：{user_query}\n图表类型：{plan.get('chart_type')}\n图表标题：{plan.get('title')}\n查询数据（前20条）：{json.dumps(data[:20], ensure_ascii=False, default=str)}"
         }
     ]
 
     step3_result = chat(step3_messages, temperature=0.3)
-    total_tokens += step3_result.get('tokens', 0)  # 累加 Token
+    total_tokens += step3_result.get('tokens', 0)
 
     if not step3_result['success']:
         return {'success': False, 'error': step3_result['error']}
@@ -208,19 +200,28 @@ ECharts配置要求：
     except json.JSONDecodeError:
         return {'success': False, 'error': f'图表配置解析失败：{step3_result["content"]}'}
 
-    insight_data = vis_result.get('insight', {})
-    if isinstance(insight_data, str):
-        # 兜底：万一大模型没有按对象格式返回，依然返回了字符串
-        insight_data = {"what": insight_data, "why": "无", "how": "无"}
-
-    return {
+    # 5. 🌟 核心组装：准备最终返回给前端的大包
+    final_response = {
         'success': True,
         'title': plan.get('title', '数据分析结果'),
         'chart_type': plan.get('chart_type'),
         'echarts_option': vis_result.get('echarts_option'),
-        'insight': insight_data,
+        'insight': vis_result.get('insight', {}),
         'sql': sql,
         'data': data,
         'latency': round(time.time() - start_time, 2),
         'total_tokens': total_tokens
     }
+
+    # 6. 🌟 异步持久化记忆落库：保存当前这轮的用户问题和 AI 的结构化回复
+    try:
+        user_msg = ChatMessage(user_id=user_id, role='user', content=user_query)
+        ai_msg = ChatMessage(user_id=user_id, role='assistant', content=json.dumps(final_response, ensure_ascii=False))
+        db.session.add(user_msg)
+        db.session.add(ai_msg)
+        db.session.commit()
+    except Exception as save_err:
+        db.session.rollback()
+        print(f"[Warning] 聊天记录落库失败: {save_err}")
+
+    return final_response

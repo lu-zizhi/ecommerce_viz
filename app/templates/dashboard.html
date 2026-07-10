@@ -1,18 +1,54 @@
 {% extends 'base.html' %}
 {% block content %}
 
-<!-- 页面标题 -->
 <div class="page-header d-flex justify-content-between align-items-center">
     <div>
-        <h4><i class="bi bi-speedometer2 text-primary me-2"></i>数据看板</h4>
-        <p>基于 Amazon 跨境电商真实数据 · 2022年3月-6月</p>
+        <h4><i class="bi bi-speedometer2 text-primary me-2"></i>智能数据看板</h4>
+        <p>基于 Amazon 跨境电商真实数据 · 多维交互沙盒系统</p>
     </div>
-    <button class="btn btn-sm btn-outline-secondary" onclick="location.reload()">
-        <i class="bi bi-arrow-clockwise me-1"></i>刷新
+    <button class="btn btn-sm btn-outline-secondary" onclick="resetFilters()">
+        <i class="bi bi-arrow-clockwise me-1"></i>重置筛选
     </button>
 </div>
 
-<!-- 顶部统计卡片 -->
+<div class="chart-card mb-4" style="padding: 15px 20px; background: #fafafa;">
+    <div class="row g-3 align-items-center">
+        <div class="col-md-3">
+            <div class="input-group input-group-sm">
+                <span class="input-group-text bg-white small">开始日期</span>
+                <input type="date" id="filter-start" class="form-control" value="2022-03-01" onchange="loadDashboardData()">
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="input-group input-group-sm">
+                <span class="input-group-text bg-white small">结束日期</span>
+                <input type="date" id="filter-end" class="form-control" value="2022-06-30" onchange="loadDashboardData()">
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="input-group input-group-sm">
+                <span class="input-group-text bg-white small">商品类目</span>
+                <select id="filter-category" class="form-select" onchange="loadDashboardData()">
+                    <option value="all">全部品类 (All Categories)</option>
+                    <option value="Set">Set (套装)</option>
+                    <option value="Kurta">Kurta (库尔塔长衫)</option>
+                    <option value="Western Dress">Western Dress (西式礼服)</option>
+                    <option value="Top">Top (上衣)</option>
+                    <option value="Ethnic Dress">Ethnic Dress (传统民族服饰)</option>
+                    <option value="Blouse">Blouse (女衬衫)</option>
+                    <option value="Bottom">Bottom (裤装)</option>
+                    <option value="Saree">Saree (纱丽)</option>
+                </select>
+            </div>
+        </div>
+        <div class="col-md-3 text-end">
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2" id="filter-status-tag">
+                <i class="bi bi-funnel-fill me-1"></i>数据已实时过滤
+            </span>
+        </div>
+    </div>
+</div>
+
 <div class="row g-3 mb-4">
     <div class="col-md-3">
         <div class="stat-card d-flex justify-content-between align-items-center">
@@ -60,7 +96,6 @@
     </div>
 </div>
 
-<!-- 销售额趋势（全宽） -->
 <div class="chart-card">
     <div class="chart-title">
         <i class="bi bi-graph-up"></i>每日销售额 & 订单数趋势
@@ -68,12 +103,11 @@
     <div id="chart-revenue" style="height:320px;"></div>
 </div>
 
-<!-- 中间两个图表 -->
-<div class="row g-3 mb-0">
+<div class="row g-3 mb-4">
     <div class="col-md-6">
         <div class="chart-card">
             <div class="chart-title">
-                <i class="bi bi-pie-chart"></i>各品类销售额占比
+                <i class="bi bi-pie-chart"></i>各品类销售额占比 (点击饼图可快速切片类目)
             </div>
             <div id="chart-category" style="height:320px;"></div>
         </div>
@@ -88,7 +122,6 @@
     </div>
 </div>
 
-<!-- 省份订单量（全宽） -->
 <div class="chart-card">
     <div class="chart-title">
         <i class="bi bi-geo-alt"></i>各省份订单量 Top10
@@ -98,110 +131,121 @@
 
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script>
+// 初始化 4 个图表画布
 const chartRevenue  = echarts.init(document.getElementById('chart-revenue'));
 const chartCategory = echarts.init(document.getElementById('chart-category'));
 const chartStatus   = echarts.init(document.getElementById('chart-status'));
 const chartState    = echarts.init(document.getElementById('chart-state'));
 
-// 汇总数字
-fetch('/api/summary').then(r => r.json()).then(data => {
-    document.getElementById('total-revenue').textContent = '₹' + data.total_revenue.toLocaleString();
-    document.getElementById('total-orders').textContent = data.total_orders.toLocaleString();
-    document.getElementById('total-products').textContent = data.total_products.toLocaleString();
-    document.getElementById('cancel-rate').textContent = data.cancel_rate + '%';
-});
+// 页面首次加载时渲染全盘数据
+window.onload = function() {
+    loadDashboardData();
+    bindChartEvents();
+};
 
-// 每日销售额趋势
-fetch('/api/daily-metrics').then(r => r.json()).then(data => {
-    chartRevenue.setOption({
-        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-        legend: { data: ['销售额', '订单数'], top: 0 },
-        grid: { left: 60, right: 60, bottom: 60, top: 40 },
-        xAxis: {
-            type: 'category', data: data.dates,
-            axisLabel: { rotate: 45, fontSize: 10, color: '#8c8c8c' },
-            axisLine: { lineStyle: { color: '#e8e8e8' } }
-        },
-        yAxis: [
-            { type: 'value', name: '销售额(INR)',
-              axisLabel: { color: '#8c8c8c' },
-              splitLine: { lineStyle: { color: '#f5f5f5' } } },
-            { type: 'value', name: '订单数',
-              axisLabel: { color: '#8c8c8c' } }
-        ],
-        series: [
-            { name: '销售额', type: 'line', data: data.revenue,
-              smooth: true, yAxisIndex: 0,
-              itemStyle: { color: '#5470c6' },
-              areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-                colorStops: [{ offset: 0, color: 'rgba(84,112,198,0.25)' },
-                             { offset: 1, color: 'rgba(84,112,198,0.02)' }] } } },
-            { name: '订单数', type: 'line', data: data.orders,
-              smooth: true, yAxisIndex: 1,
-              itemStyle: { color: '#91cc75' },
-              areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-                colorStops: [{ offset: 0, color: 'rgba(145,204,117,0.2)' },
-                             { offset: 1, color: 'rgba(145,204,117,0.02)' }] } } }
-        ]
+function loadDashboardData() {
+    // 1. 获取当前控制沙盒中的参数
+    const start = document.getElementById('filter-start').value;
+    const end = document.getElementById('filter-end').value;
+    const category = document.getElementById('filter-category').value;
+
+    // 组装 URL 参数查询字符串
+    const urlParams = `?start_date=${start}&end_date=${end}&category=${category}`;
+
+    // 2. 异步刷新顶部卡片四个汇总数字
+    fetch('/api/summary' + urlParams).then(r => r.json()).then(data => {
+        document.getElementById('total-revenue').textContent = '₹' + data.total_revenue.toLocaleString();
+        document.getElementById('total-orders').textContent = data.total_orders.toLocaleString();
+        document.getElementById('total-products').textContent = data.total_products.toLocaleString();
+        document.getElementById('cancel-rate').textContent = data.cancel_rate + '%';
     });
-});
 
-// 品类销售占比
-fetch('/api/category-sales').then(r => r.json()).then(data => {
-    chartCategory.setOption({
-        tooltip: { trigger: 'item', formatter: '{b}<br/>₹{c} ({d}%)' },
-        legend: { orient: 'vertical', left: 'left', top: 'center',
-                  textStyle: { fontSize: 12, color: '#595959' } },
-        series: [{
-            type: 'pie', radius: ['42%', '68%'],
-            center: ['62%', '50%'],
-            data: data,
-            label: { show: false },
-            emphasis: { label: { show: true, fontSize: 13, fontWeight: 'bold' },
-                        itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.2)' } }
-        }]
-    });
-});
-
-// 订单状态分布
-fetch('/api/order-status').then(r => r.json()).then(data => {
-    chartStatus.setOption({
-        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-        legend: { orient: 'vertical', left: 'left', top: 'center',
-                  textStyle: { fontSize: 11, color: '#595959' } },
-        series: [{
-            type: 'pie', radius: ['42%', '68%'],
-            center: ['62%', '50%'],
-            data: data,
-            label: { show: false },
-            emphasis: { label: { show: true, fontSize: 12, fontWeight: 'bold' },
-                        itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.2)' } }
-        }]
-    });
-});
-
-// 省份订单量 Top10
-fetch('/api/state-orders').then(r => r.json()).then(data => {
-    chartState.setOption({
-        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-        grid: { left: 120, right: 40, bottom: 20, top: 20 },
-        xAxis: { type: 'value', axisLabel: { color: '#8c8c8c' },
-                 splitLine: { lineStyle: { color: '#f5f5f5' } } },
-        yAxis: { type: 'category', data: [...data.states].reverse(),
-                 axisLabel: { fontSize: 12, color: '#595959' } },
-        series: [{
-            type: 'bar', data: [...data.counts].reverse(),
-            itemStyle: {
-                color: { type: 'linear', x: 0, y: 0, x2: 1, y2: 0,
-                    colorStops: [{ offset: 0, color: '#5470c6' },
-                                 { offset: 1, color: '#91cc75' }] }
+    // 3. 异步刷新双轴折线图趋势
+    fetch('/api/daily-metrics' + urlParams).then(r => r.json()).then(data => {
+        chartRevenue.setOption({
+            tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+            legend: { data: ['销售额', '订单数'], top: 0 },
+            grid: { left: 60, right: 60, bottom: 60, top: 40 },
+            xAxis: {
+                type: 'category', data: data.dates,
+                axisLabel: { rotate: 45, fontSize: 10, color: '#8c8c8c' },
+                axisLine: { lineStyle: { color: '#e8e8e8' } }
             },
-            label: { show: true, position: 'right', color: '#595959', fontSize: 11 },
-            barMaxWidth: 28
-        }]
+            yAxis: [
+                { type: 'value', name: '销售额(INR)', axisLabel: { color: '#8c8c8c' }, splitLine: { lineStyle: { color: '#f5f5f5' } } },
+                { type: 'value', name: '订单数', axisLabel: { color: '#8c8c8c' } }
+            ],
+            series: [
+                { name: '销售额', type: 'line', data: data.revenue, smooth: true, yAxisIndex: 0, itemStyle: { color: '#5470c6' } },
+                { name: '订单数', type: 'line', data: data.orders, smooth: true, yAxisIndex: 1, itemStyle: { color: '#91cc75' } }
+            ]
+        }, true); // 使用 true 清除历史残余数据残影
     });
-});
 
+    // 4. 异步刷新品类销售占比饼图
+    fetch('/api/category-sales' + urlParams).then(r => r.json()).then(data => {
+        chartCategory.setOption({
+            tooltip: { trigger: 'item', formatter: '{b}<br/>₹{c} ({d}%)' },
+            legend: { orient: 'vertical', left: 'left', top: 'center', textStyle: { fontSize: 11, color: '#595959' } },
+            series: [{
+                type: 'pie', radius: ['42%', '68%'], center: ['62%', '50%'], data: data,
+                label: { show: false },
+                emphasis: { label: { show: true, fontSize: 13, fontWeight: 'bold' } }
+            }]
+        }, true);
+    });
+
+    // 5. 异步刷新订单状态饼图
+    fetch('/api/order-status' + urlParams).then(r => r.json()).then(data => {
+        chartStatus.setOption({
+            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+            legend: { orient: 'vertical', left: 'left', top: 'center', textStyle: { fontSize: 11, color: '#595959' } },
+            series: [{
+                type: 'pie', radius: ['42%', '68%'], center: ['62%', '50%'], data: data,
+                label: { show: false }
+            }]
+        }, true);
+    });
+
+    // 6. 异步刷新省份 Top10 柱状图
+    fetch('/api/state-orders' + urlParams).then(r => r.json()).then(data => {
+        chartState.setOption({
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: 120, right: 40, bottom: 20, top: 20 },
+            xAxis: { type: 'value', axisLabel: { color: '#8c8c8c' }, splitLine: { lineStyle: { color: '#f5f5f5' } } },
+            yAxis: { type: 'category', data: [...data.states].reverse(), axisLabel: { fontSize: 11, color: '#595959' } },
+            series: [{
+                type: 'bar', data: [...data.counts].reverse(),
+                itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 1, y2: 0, colorStops: [{ offset: 0, color: '#5470c6' }, { offset: 1, color: '#91cc75' }] } },
+                label: { show: true, position: 'right', color: '#595959', fontSize: 11 }
+            }]
+        }, true);
+    });
+}
+
+// 🌟 新增高级联动：在 ECharts 图表上绑定交互点击下钻事件
+function bindChartEvents() {
+    chartCategory.on('click', function (params) {
+        // 当用户用鼠标点击饼图里的某一个特定服装品类时，前端自动把下拉选择框切到该类目
+        const selectedCategory = params.name;
+        const selector = document.getElementById('filter-category');
+
+        if(selector.querySelector(`option[value="${selectedCategory}"]`)) {
+            selector.value = selectedCategory;
+            // 重新驱动全盘数据局部刷新下钻！
+            loadDashboardData();
+        }
+    });
+}
+
+function resetFilters() {
+    document.getElementById('filter-start').value = '2022-03-01';
+    document.getElementById('filter-end').value = '2022-06-30';
+    document.getElementById('filter-category').value = 'all';
+    loadDashboardData();
+}
+
+// 监听窗口大小缩放
 window.addEventListener('resize', () => {
     chartRevenue.resize(); chartCategory.resize();
     chartStatus.resize(); chartState.resize();

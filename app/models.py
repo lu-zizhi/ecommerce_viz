@@ -117,3 +117,21 @@ class DailyMetrics(db.Model):
             'avg_order_value': self.avg_order_value,
             'cancelled_orders': self.cancelled_orders
         }
+
+class ChatMessage(db.Model):
+    """AI 智能分析多轮对话历史表"""
+    __tablename__ = 'chat_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, comment='所属用户')
+    role = db.Column(db.String(16), nullable=False, comment='角色: user 或 assistant')
+    content = db.Column(db.Text, nullable=False, comment='消息内容(文本或结构化JSON)')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'role': self.role,
+            'content': self.content,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        }
