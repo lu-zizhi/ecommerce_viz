@@ -2,21 +2,22 @@ from flask import Blueprint, render_template, jsonify
 from app.models import Order, DailyMetrics
 from app import db
 from sqlalchemy import func
+from flask_login import login_required  # 引入加锁工具
 
 main_bp = Blueprint('main', __name__)
-
-
 @main_bp.route('/')
+@login_required  # 挂上这把锁
 def index():
     return render_template('dashboard.html')
 
-
 @main_bp.route('/dashboard')
+@login_required
 def dashboard():
     return render_template('dashboard.html')
 
 
 @main_bp.route('/api/daily-metrics')
+@login_required
 def api_daily_metrics():
     """折线图数据：每日销售额和订单数"""
     metrics = DailyMetrics.query.order_by(DailyMetrics.date).all()
@@ -29,6 +30,7 @@ def api_daily_metrics():
 
 
 @main_bp.route('/api/category-sales')
+@login_required
 def api_category_sales():
     """饼图数据：各品类销售额占比"""
     results = db.session.query(
@@ -46,6 +48,7 @@ def api_category_sales():
 
 
 @main_bp.route('/api/state-orders')
+@login_required
 def api_state_orders():
     """柱状图数据：各省份订单量 Top10"""
     results = db.session.query(
@@ -63,6 +66,7 @@ def api_state_orders():
 
 
 @main_bp.route('/api/order-status')
+@login_required
 def api_order_status():
     """饼图数据：订单状态分布"""
     results = db.session.query(
@@ -77,6 +81,7 @@ def api_order_status():
 
 
 @main_bp.route('/api/summary')
+@login_required
 def api_summary():
     """看板顶部汇总数字"""
     total_revenue = db.session.query(

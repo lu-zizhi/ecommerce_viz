@@ -143,6 +143,12 @@
            href="/ai">
             <i class="bi bi-robot"></i>智能分析
         </a>
+    <span class="nav-link text-white-50 small d-flex align-items-center ms-3" style="pointer-events: none;">
+        <i class="bi bi-user-check text-success me-1"></i>{{ current_user.username }}
+    </span>
+    <a class="nav-link text-danger-emphasis" href="{{ url_for('auth.logout') }}">
+        <i class="bi bi-box-arrow-right"></i>退出
+    </a>
     </div>
 </nav>
 

@@ -1,16 +1,21 @@
 from flask import Blueprint, render_template, request, jsonify
 from app.services.data_processor import import_products, import_orders, compute_daily_metrics
 import os
+from flask_login import login_required  # 引入加锁工具
+
+
 
 data_bp = Blueprint('data', __name__)
 
 @data_bp.route('/')
+@login_required
 def index():
     """数据管理页"""
     return render_template('data.html')
 
 
 @data_bp.route('/upload', methods=['POST'])
+@login_required
 def upload():
     """
     接收上传的CSV文件
@@ -42,6 +47,7 @@ def upload():
 
 
 @data_bp.route('/import-local', methods=['POST'])
+@login_required
 def import_local():
     """
     直接导入本地 data/ 目录下的文件
@@ -67,6 +73,7 @@ def import_local():
 
 
 @data_bp.route('/stats', methods=['GET'])
+@login_required
 def stats():
     """返回当前数据库中各表的数据量"""
     from app.models import Product, Order, DailyMetrics

@@ -1,16 +1,19 @@
 from flask import Blueprint, render_template, request, jsonify
 from app.services.nl2vis import nl2vis
+from flask_login import login_required  # 引入加锁工具
+
 
 # 定义蓝图
 ai_bp = Blueprint('ai', __name__)
 
-
 @ai_bp.route('/')
+@login_required
 def index():
     return render_template('ai_chat.html')
 
 
 @ai_bp.route('/query', methods=['POST'])
+@login_required
 def query():
     """
     接收自然语言查询，返回图表配置和洞察

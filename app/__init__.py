@@ -1,36 +1,46 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager  # 确保引入了登录管理器
 from config import Config
 
-# 创建数据库对象（此时还没有绑定app，后面在create_app里绑定）
-db = SQLAlchemy()
 
+db = SQLAlchemy()
+login_manager = LoginManager()
 
 def create_app():
-    # 创建 Flask 实例，告诉它静态文件和模板在哪里
-    app = Flask(__name__,
-                template_folder='templates',
-                static_folder='static')
-
-    # 加载 config.py 里的配置
+    app = Flask(__name__, template_folder='templates', static_folder='static')
     app.config.from_object(Config)
 
-    # 把数据库绑定到这个 app
+    # 2. 初始化数据库
     db.init_app(app)
 
-    # 注册 Blueprint（路由模块）
-    # 💡 Blueprint 就是把路由分文件管理，每个模块各管各的
+    # 3. 把登录管理器正式注册到当前运行的 app 对象中
+    print("====== [系统状态] 正在向 Flask 核心注入登录管理器... ======")
+    login_manager.init_app(app)
+
+    login_manager.login_view = 'auth.login'  # 设定未登录时重定向的路由
+    login_manager.login_message = '请先登录以访问跨境电商可视化系统'
+    login_manager.login_message_category = 'warning'
+
+    # 4. 告诉 Flask-Login 怎么通过 Session 里的用户 ID 去数据库捞人
+    from app.models import User
+    @login_manager.user_loader
+    def load_user(user_id):
+        return User.query.get(int(user_id))
+
+    # 5. 注册全套业务蓝图（确保包含新写的 auth_bp）
     from app.routes.main import main_bp
     from app.routes.data import data_bp
     from app.routes.ai import ai_bp
+    from app.routes.auth import auth_bp
 
-    app.register_blueprint(main_bp)  # 首页/看板路由
-    app.register_blueprint(data_bp, url_prefix='/data')  # 数据管理路由，url前缀/data
-    app.register_blueprint(ai_bp, url_prefix='/ai')  # AI分析路由，url前缀/ai
+    app.register_blueprint(main_bp)
+    app.register_blueprint(data_bp, url_prefix='/data')
+    app.register_blueprint(ai_bp, url_prefix='/ai')
+    app.register_blueprint(auth_bp, url_prefix='/auth')
 
-    # 自动创建数据库表（如果不存在）
+    # 6. 自动建表（此时 users 表会被自动刷进数据库）
     with app.app_context():
-        from app import models  # 先导入模型，让SQLAlchemy知道有哪些表
         db.create_all()
 
     return app
