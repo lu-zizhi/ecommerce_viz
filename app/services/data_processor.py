@@ -184,77 +184,105 @@ def compute_daily_metrics():
         db.session.rollback()
         return {'success': False, 'error': str(e)}
 
+
 def import_external_generic_orders(filepath, mapping_dict):
-        """
-        通用异构数据映射与日期智能嗅探适配器
-        :param filepath: 上传的任意第三方异构电商CSV文件路径
-        :param mapping_dict: 前端传来的字段映射字典，例如：{'order_id': '订单号', 'amount': '实付金额'}
-        """
-        try:
-            # 1. 轻量读入数据，强制转为字符串防止前导0丢失
-            df = pd.read_csv(filepath, dtype=str)
+    """
+    🌟 终极强健版：通用异构数据映射与日期智能嗅探适配器（集成多重编码兼容 + 脏行自动跳过）
+    """
+    try:
+        # 1. 智能编码盲盒级兼容
+        encodings = ['utf-8', 'gbk', 'utf-8-sig', 'gb2312']
+        df = None
 
-            # 清理列名的前后隐藏空格
-            df.columns = [col.strip() for col in df.columns]
+        for enc in encodings:
+            try:
+                # 🌟 核心升级：加入 on_bad_lines='skip'，如果CSV里某一行格式坏了（如列数不对），自动跳过它而不是直接崩溃
+                df = pd.read_csv(filepath, dtype=str, encoding=enc, on_bad_lines='skip')
+                print(f"👉 [ETL 编码审计] 成功使用 {enc} 编码完成文件内容解析！")
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
 
-            # 2. 动态逆向映射：把用户的奇葩列名统一转换为我们系统数据库的标准字段名
-            inverse_map = {v: k for k, v in mapping_dict.items() if v}
-            df = df.rename(columns=inverse_map)
+        if df is None:
+            return {'success': False, 'error': '文件编码格式过于特殊，系统无法解码，请务必保证CSV为常规UTF-8或GBK编码'}
 
-            # 3. 检查系统核心必填字段是否已通过映射成功捕获
-            required_fields = ['order_id', 'date', 'sku', 'quantity', 'amount']
-            missing = [f for f in required_fields if f not in df.columns]
-            if missing:
-                return {'success': False, 'error': f'映射失败！您的配置中缺失核心必填项: {missing}'}
+        # 如果文件读出来是空的，直接熔断
+        if df.empty:
+            return {'success': False, 'error': '上传的CSV文件内容为空或行格式完全不匹配，请检查文件结构'}
 
-            imported_count = 0
-            skipped_count = 0
+        # 清理列名的前后隐藏空格
+        df.columns = [col.strip() for col in df.columns]
 
-            # 4. 开启高性能的逐行清洗与数据类型硬核熔断转换
-            for _, row in df.iterrows():
-                # 规避重复订单入库
-                existing = Order.query.filter_by(order_id=str(row['order_id'])).first()
-                if existing:
-                    skipped_count += 1
+        # 2. 动态逆向映射：把用户的自定义列名转换为系统标准字段名
+        inverse_map = {v: k for k, v in mapping_dict.items() if v}
+        df = df.rename(columns=inverse_map)
+
+        # 3. 检查系统核心必填字段是否已成功捕获
+        required_fields = ['order_id', 'date', 'sku', 'quantity', 'amount']
+        missing = [f for f in required_fields if f not in df.columns]
+        if missing:
+            return {'success': False, 'error': f'映射失败！您的配置中缺失核心必填项: {missing}'}
+
+        imported_count = 0
+        skipped_count = 0
+
+        # 4. 开启高性能的逐行清洗与数据类型硬核熔断转换
+        for _, row in df.iterrows():
+            if pd.isna(row['order_id']) or str(row['order_id']).strip() == '':
+                continue
+
+            # 规避重复订单入库
+            existing = Order.query.filter_by(order_id=str(row['order_id'])).first()
+            if existing:
+                skipped_count += 1
+                continue
+
+            # 日期智能嗅探与自愈算法
+            raw_date = str(row['date']).strip()
+            parsed_date = None
+            for fmt in ('%m-%d-%y', '%Y-%m-%d', '%Y/%m/%d', '%d-%m-%Y', '%m/%d/%y', '%Y%m%d'):
+                try:
+                    parsed_date = datetime.strptime(raw_date, fmt).date()
+                    break
+                except ValueError:
                     continue
 
-                # 🌟 日期智能嗅探与自愈算法：自动识别并对齐多种世界主流时间格式
-                raw_date = str(row['date']).strip()
-                parsed_date = None
-                for fmt in ('%m-%d-%y', '%Y-%m-%d', '%Y/%m/%d', '%d-%m-%Y', '%m/%d/%y'):
-                    try:
-                        parsed_date = datetime.strptime(raw_date, fmt).date()
-                        break
-                    except ValueError:
-                        continue
+            if not parsed_date:
+                parsed_date = datetime.utcnow().date()
 
-                if not parsed_date:
-                    # 如果时间戳彻底无法识别，降级为当前系统时间，防止主线程阻断死锁
-                    parsed_date = datetime.utcnow().date()
+            # 安全格式化数值类型
+            try:
+                qty_val = int(float(str(row['quantity']).replace(',', '')))
+            except:
+                qty_val = 1
 
-                # 组装 ORM 实体
-                new_order = Order(
-                    order_id=str(row['order_id']),
-                    date=parsed_date,
-                    status=str(row.get('status', 'Shipped')).strip(),
-                    category=str(row.get('category', 'Other')).strip(),
-                    sku=str(row['sku']).strip(),
-                    size=str(row.get('size', 'M')).strip(),
-                    quantity=int(float(row['quantity'] or 1)),
-                    amount=float(row['amount'] or 0),
-                    ship_state=str(row.get('ship_state', '未知')).strip(),
-                    b2b=int(float(row.get('b2b', 0))) if str(row.get('b2b')).isdigit() else 0
-                )
-                db.session.add(new_order)
-                imported_count += 1
+            try:
+                amount_val = float(str(row['amount']).replace(',', ''))
+            except:
+                amount_val = 0.0
 
-                # 分批次提交数据库，优化高并发内存占用率
-                if imported_count % 1000 == 0:
-                    db.session.commit()
+            # 组装 ORM 实体
+            new_order = Order(
+                order_id=str(row['order_id']),
+                date=parsed_date,
+                status=str(row.get('status', 'Shipped')).strip(),
+                category=str(row.get('category', 'Other')).strip(),
+                sku=str(row['sku']).strip(),
+                size=str(row.get('size', 'M')).strip(),
+                quantity=qty_val,
+                amount=amount_val,
+                ship_state=str(row.get('ship_state', '未知')).strip(),
+                b2b=int(float(row.get('b2b', 0))) if str(row.get('b2b')).isdigit() else 0
+            )
+            db.session.add(new_order)
+            imported_count += 1
 
-            db.session.commit()
-            return {'success': True, 'imported': imported_count, 'skipped': skipped_count}
+            if imported_count % 1000 == 0:
+                db.session.commit()
 
-        except Exception as e:
-            db.session.rollback()
-            return {'success': False, 'error': f'ETL适配管道发生异常崩溃: {str(e)}'}
+        db.session.commit()
+        return {'success': True, 'imported': imported_count, 'skipped': skipped_count}
+
+    except Exception as e:
+        db.session.rollback()
+        return {'success': False, 'error': f'ETL适配管道发生异常崩溃: {str(e)}'}
